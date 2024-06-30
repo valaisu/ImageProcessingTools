@@ -3,7 +3,13 @@
 #include <vector>
 #include <stdexcept>
 
-using Pixel = std::vector<unsigned char>; // 
+/*
+
+This program implements some image processing tools with CPU
+
+*/
+
+using Pixel = std::vector<unsigned char>;
 using ImageVec = std::vector<Pixel>;
 
 // Loads an image to essentially a 2D vector of chars with shape [pixels][3]
@@ -11,7 +17,7 @@ ImageVec loadImageToVector(const std::string &filename, int &width, int &height)
     
     sf::Texture texture;
     if (!texture.loadFromFile(filename)) {
-        throw std::runtime_error("Failed to load image from " + filename); // add file loc
+        throw std::runtime_error("Failed to load image from " + filename);
     }
 
     sf::Vector2u size = texture.getSize();
@@ -35,12 +41,38 @@ ImageVec loadImageToVector(const std::string &filename, int &width, int &height)
     return imageVector;
 }
 
+
+void blur(ImageVec image, int imageWidth, int imageHeight, std::vector<float> kernel, int kenrelDim) {
+    /*
+    Params:
+    image: vector of imageWidth*imageHeight Pixels
+    kernel: precalculated 3*3 matrix
+    
+    For the edges, we are ok losing a bit of color
+    meaning we treat the image as if it was padded with zeros
+    */
+
+    // lets do first something that works
+    // 2D binomial blur can be applied separately for both dimensions
+    
+    // TODO:
+
+    // calc 1D kernel values from pascals triangle
+    // for dimensions
+    //      create integral table
+    //      calc and update blur
+
+    
+
+}
+
+
 int main() {
     int width, height, channels = 3;
     ImageVec imageVector;
 
     try {
-        imageVector = loadImageToVector("../Mayhem.jpg", width, height);
+        imageVector = loadImageToVector("Mayhem.jpg", width, height);
     } catch (const std::exception &e) {
         std::cerr << e.what() << std::endl;
         return 1;
@@ -60,6 +92,14 @@ int main() {
         }
         std::cout << std::endl;
     }
+
+    float corner = 0.0625, edge = 0.125, mid = 0.25;
+    std::vector<float> exampleKernel = {
+        corner, edge, corner, 
+        edge,   mid,  edge, 
+        corner, edge, corner};
+
+    blur(imageVector, width, height, exampleKernel, 3);
 
     return 0;
 }
