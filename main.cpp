@@ -5,12 +5,20 @@
 #include <stdexcept>
 #include <functional>
 #include <map>
+#include <chrono>
+#include <omp.h>
+
+
+uint64_t timeNow() {
+   using namespace std::chrono;
+   return duration_cast<milliseconds>(system_clock::now().time_since_epoch()).count();
+} 
 
 /*
 
 This program implements some image processing tools with CPU
 compile: 
-g++ -o display main.cpp -lsfml-graphics -lsfml-window -lsfml-system
+g++ -fopenmp -o display main.cpp -lsfml-graphics -lsfml-window -lsfml-system
 
 */
 
@@ -113,7 +121,7 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
         ✔Implement naive blur
         ✔Separate dimensions
         Optimize algorithm
-            multithread
+            ✔multithread
             vectorization
             ILP
         Algo for big kernels (size>8)
@@ -133,7 +141,7 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
     }
 
 
-    int rowTotal = power(2, kernelSize*2); // 2^(kernelSize*2) 
+    int pascalRowSum = power(2, kernelSize*2); // 2^(kernelSize*2) 
     int pascalRowNumber = kernelSize*2; // the first row has number or index "0"
 
     std::vector<int> pascalRow(pascalRowNumber+1);
@@ -152,6 +160,7 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
         std::fill(buffer.begin(), buffer.end(), 0);
 
         // horizontal blur
+        #pragma omp parallel for schedule(dynamic)
         for (size_t y = 0; y < heightImage; y++) {
             for (size_t x = 0; x < widthImage; x++) {
 
@@ -164,7 +173,7 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
                 }
 
                 //normalize
-                (*image)[y*widthImage + x][color] = buffer[y*widthImage + x] / rowTotal;
+                (*image)[y*widthImage + x][color] = buffer[y*widthImage + x] / pascalRowSum;
             }
         }
 
@@ -172,19 +181,20 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
         std::fill(buffer.begin(), buffer.end(), 0);
 
         // vertical blur
+        #pragma omp parallel for schedule(dynamic)
         for (size_t y = 0; y < heightImage; y++) {
             for (size_t x = 0; x < widthImage; x++) {
 
                 // add all squares
                 for (int k = -kernelSize; k <= kernelSize; k++) {
-                    if ((0>y+k)||(y+k>=widthImage)) {
+                    if ((0>y+k)||(y+k>=heightImage)) {
                         continue;
                     }
                     buffer[y*widthImage + x] += (*image)[(y+k)*widthImage + x][color] * pascalRow[k+kernelSize];
                 }
 
                 //normalize
-                (*image)[y*widthImage + x][color] = buffer[y*widthImage + x] / rowTotal;
+                (*image)[y*widthImage + x][color] = buffer[y*widthImage + x] / pascalRowSum;
             }
         }
 
@@ -209,7 +219,9 @@ int main() {
 
     std::cout << "Dimensions: " << width << "x" << height << std::endl;
 
+    auto before = timeNow();
     blur(&imageVector, width, height, 5);
+    printf("Blurring took %.5fs\n", (timeNow() - before)/1000.0);
     sf::Image blurred = vectorToImage(imageVector, width, height);
 
     sf::Texture texture;
