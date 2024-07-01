@@ -22,11 +22,16 @@ g++ -fopenmp -o display main.cpp -lsfml-graphics -lsfml-window -lsfml-system
 
 */
 
-using Pixel = std::vector<unsigned char>;
-using ImageVec = std::vector<Pixel>;
+/*
+- x coordinates: 0 <= x < width
+- y coordinates: 0 <= y < height
+- color components: 0 <= c < 3
+- input: data[c*width*height + y*width + x]
+*/
+using ImageVec = std::vector<unsigned char>;
 
 
-// Loads an image to essentially a 2D vector of chars with shape [pixels][3]
+// Loads an image to a flattened vector
 ImageVec loadImageToVector(const std::string &filename, int &width, int &height) {
     
     sf::Texture texture;
@@ -41,14 +46,15 @@ ImageVec loadImageToVector(const std::string &filename, int &width, int &height)
     int channels = 3;
     sf::Image image = texture.copyToImage();
 
-    ImageVec imageVector(height*width, Pixel(channels));
+    int pixels = height*width;
+    ImageVec imageVector(pixels*3);
 
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             sf::Color color = image.getPixel(x, y);
-            imageVector[y*width + x][0] = color.r;
-            imageVector[y*width + x][1] = color.g;
-            imageVector[y*width + x][2] = color.b;
+            imageVector[0*pixels + y*width + x] = color.r;
+            imageVector[1*pixels + y*width + x] = color.g;
+            imageVector[2*pixels + y*width + x] = color.b;
         }
     }
 
@@ -56,13 +62,15 @@ ImageVec loadImageToVector(const std::string &filename, int &width, int &height)
 }
 
 
-sf::Image vectorToImage(const ImageVec& imageVec, int width, int height) {
+sf::Image vectorToImage(const unsigned char *imageVec, int width, int height) {
     sf::Image image;
+    int size = width*height;
     image.create(width, height);
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
-            const Pixel& pixel = imageVec[y * width + x];
-            sf::Color color(pixel[0], pixel[1], pixel[2]);
+            sf::Color color(imageVec[size*0 + y*width + x], 
+                            imageVec[size*1 + y*width + x], 
+                            imageVec[size*2 + y*width + x]);
             image.setPixel(x, y, color);
         }
     }
@@ -103,7 +111,7 @@ int power(const int a, const int b) {
 
 
 // Applies binomial blur for ImageVec
-void blur(ImageVec* image, const int widthImage, const int heightImage, const int kernelSize) {
+void blur(unsigned char* image, const int widthImage, const int heightImage, const int kernelSize) {
     /*
     Params:
     image: vector of widthImage*heightImage Pixels
@@ -140,7 +148,7 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
         return;
     }
 
-
+    int imageSize = widthImage*heightImage;
     int pascalRowSum = power(2, kernelSize*2); // 2^(kernelSize*2) 
     int pascalRowNumber = kernelSize*2; // the first row has number or index "0"
 
@@ -153,7 +161,7 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
     //printf("%d %d %d \n", int((*image)[0][0]), int((*image)[0][1]), int((*image)[0][2]));
 
     // horizontal blur moves data in here, and vertical blur moves it back out
-    std::vector<int> buffer(widthImage * heightImage);    
+    std::vector<int> buffer(widthImage * heightImage); // TODO: try should this also be char?
 
     for (int color = 0; color < 3; color++) {
         // clean buffer
@@ -169,11 +177,11 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
                     if ((0>x+k)||(x+k>=widthImage)) {
                         continue;
                     }
-                    buffer[y*widthImage + x] += (*image)[y*widthImage + x+k][color] * pascalRow[k+kernelSize];
+                    buffer[y*widthImage + x] += image[color*imageSize + y*widthImage + x+k] * pascalRow[k+kernelSize];
                 }
 
                 //normalize
-                (*image)[y*widthImage + x][color] = buffer[y*widthImage + x] / pascalRowSum;
+                image[color*imageSize + y*widthImage + x] = buffer[y*widthImage + x] / pascalRowSum;
             }
         }
 
@@ -190,11 +198,11 @@ void blur(ImageVec* image, const int widthImage, const int heightImage, const in
                     if ((0>y+k)||(y+k>=heightImage)) {
                         continue;
                     }
-                    buffer[y*widthImage + x] += (*image)[(y+k)*widthImage + x][color] * pascalRow[k+kernelSize];
+                    buffer[y*widthImage + x] += image[color*imageSize + y*widthImage + x+k] * pascalRow[k+kernelSize];
                 }
 
                 //normalize
-                (*image)[y*widthImage + x][color] = buffer[y*widthImage + x] / pascalRowSum;
+                image[color*imageSize + y*widthImage + x] = buffer[y*widthImage + x] / pascalRowSum;
             }
         }
 
@@ -220,9 +228,9 @@ int main() {
     std::cout << "Dimensions: " << width << "x" << height << std::endl;
 
     auto before = timeNow();
-    blur(&imageVector, width, height, 5);
+    blur(&imageVector[0], width, height, 5);
     printf("Blurring took %.5fs\n", (timeNow() - before)/1000.0);
-    sf::Image blurred = vectorToImage(imageVector, width, height);
+    sf::Image blurred = vectorToImage(&imageVector[0], width, height);
 
     sf::Texture texture;
     texture.loadFromImage(blurred);
