@@ -1,16 +1,22 @@
 #include <SFML/Graphics.hpp>
 #include <iostream>
+#include <numeric>
 #include <vector>
 #include <stdexcept>
+#include <functional>
+#include <map>
 
 /*
 
 This program implements some image processing tools with CPU
+compile: 
+g++ -o display main.cpp -lsfml-graphics -lsfml-window -lsfml-system
 
 */
 
 using Pixel = std::vector<unsigned char>;
 using ImageVec = std::vector<Pixel>;
+
 
 // Loads an image to essentially a 2D vector of chars with shape [pixels][3]
 ImageVec loadImageToVector(const std::string &filename, int &width, int &height) {
@@ -42,11 +48,58 @@ ImageVec loadImageToVector(const std::string &filename, int &width, int &height)
 }
 
 
-void blur(ImageVec image, int imageWidth, int imageHeight, std::vector<float> kernel, int kenrelDim) {
+sf::Image vectorToImage(const ImageVec& imageVec, int width, int height) {
+    sf::Image image;
+    image.create(width, height);
+    for (int y = 0; y < height; ++y) {
+        for (int x = 0; x < width; ++x) {
+            const Pixel& pixel = imageVec[y * width + x];
+            sf::Color color(pixel[0], pixel[1], pixel[2]);
+            image.setPixel(x, y, color);
+        }
+    }
+    return image;
+}
+
+
+unsigned long long factorial(const int n) {
+    unsigned long long res = 1;
+    for (int i = 1; i <= n; ++i) {
+        res *= i;
+    }
+    return res;
+}
+
+
+unsigned long long binomialCoefficient(const int n, int k) {
+    if (2*k > n) {
+        k = n - k; 
+    }
+    unsigned long long result = 1;
+    for (int i = 0; i < k; ++i) {
+        result *= (n - i);
+        result /= (i + 1);
+    }
+
+    return result;
+}
+
+// Note: Don't use for calculating values bigger than 2147483647
+int power(const int a, const int b) {
+    int res = 1;
+    for (int i = 0; i < b; i++) {
+        res = res*a;
+    }
+    return res;
+}
+
+
+// Applies binomial blur for ImageVec
+void blur(ImageVec* image, const int widthImage, const int heightImage, const int kernelSize) {
     /*
     Params:
-    image: vector of imageWidth*imageHeight Pixels
-    kernel: precalculated 3*3 matrix
+    image: vector of widthImage*heightImage Pixels
+    kernelSize: The distance from edge of kernel to the center of the kernel. For 3x3 kernel this would be 1, 5x5-> 2, 9x9->4 ... 
     
     For the edges, we are ok losing a bit of color
     meaning we treat the image as if it was padded with zeros
@@ -54,15 +107,91 @@ void blur(ImageVec image, int imageWidth, int imageHeight, std::vector<float> ke
 
     // lets do first something that works
     // 2D binomial blur can be applied separately for both dimensions
-    
-    // TODO:
 
-    // calc 1D kernel values from pascals triangle
-    // for dimensions
-    //      create integral table
-    //      calc and update blur
-
+    /* 
+    TODO:
+        ✔Implement naive blur
+        ✔Separate dimensions
+        Optimize algorithm
+            multithread
+            vectorization
+            ILP
+        Algo for big kernels (size>8)
+    */
     
+
+    if (kernelSize > 8) {
+        printf("The kenrel is too big, causes integer overflow\n");
+        // The solution to this problem is maths: 
+        // Applying blur once with kernel width 21 is the same as applying blur twice with
+        // kernel width 11, as the convolution of pascal's triangles row 11 with it self results
+        // in pascals triangle row 21
+        // The inevitable side effect ofcourse is a small reduction in accuracy
+        // TODO: fix accordingly
+
+        return;
+    }
+
+
+    int rowTotal = power(2, kernelSize*2); // 2^(kernelSize*2) 
+    int pascalRowNumber = kernelSize*2; // the first row has number or index "0"
+
+    std::vector<int> pascalRow(pascalRowNumber+1);
+    for (int i = 0; i <= pascalRowNumber; i++) {
+        pascalRow[i] = int(binomialCoefficient(pascalRowNumber, i));
+    }
+
+    //printf("Corner before: \n");
+    //printf("%d %d %d \n", int((*image)[0][0]), int((*image)[0][1]), int((*image)[0][2]));
+
+    // horizontal blur moves data in here, and vertical blur moves it back out
+    std::vector<int> buffer(widthImage * heightImage);    
+
+    for (int color = 0; color < 3; color++) {
+        // clean buffer
+        std::fill(buffer.begin(), buffer.end(), 0);
+
+        // horizontal blur
+        for (size_t y = 0; y < heightImage; y++) {
+            for (size_t x = 0; x < widthImage; x++) {
+
+                // add all squares
+                for (int k = -kernelSize; k <= kernelSize; k++) {
+                    if ((0>x+k)||(x+k>=widthImage)) {
+                        continue;
+                    }
+                    buffer[y*widthImage + x] += (*image)[y*widthImage + x+k][color] * pascalRow[k+kernelSize];
+                }
+
+                //normalize
+                (*image)[y*widthImage + x][color] = buffer[y*widthImage + x] / rowTotal;
+            }
+        }
+
+        // clean buffer
+        std::fill(buffer.begin(), buffer.end(), 0);
+
+        // vertical blur
+        for (size_t y = 0; y < heightImage; y++) {
+            for (size_t x = 0; x < widthImage; x++) {
+
+                // add all squares
+                for (int k = -kernelSize; k <= kernelSize; k++) {
+                    if ((0>y+k)||(y+k>=widthImage)) {
+                        continue;
+                    }
+                    buffer[y*widthImage + x] += (*image)[(y+k)*widthImage + x][color] * pascalRow[k+kernelSize];
+                }
+
+                //normalize
+                (*image)[y*widthImage + x][color] = buffer[y*widthImage + x] / rowTotal;
+            }
+        }
+
+    }
+
+    //printf("Corner after: \n");
+    //printf("%d %d %d \n", int((*image)[0][0]), int((*image)[0][1]), int((*image)[0][2]));
 
 }
 
@@ -80,26 +209,26 @@ int main() {
 
     std::cout << "Dimensions: " << width << "x" << height << std::endl;
 
-    // testing
-    for (int y = 0; y < 5; ++y) {
-        for (int x = 0; x < 5; ++x) {
-            std::cout << "(";
-            for (int c = 0; c < channels; ++c) {
-                std::cout << static_cast<int>(imageVector[y*width+x][c]);
-                if (c < channels - 1) std::cout << ", ";
-            }
-            std::cout << ") ";
+    blur(&imageVector, width, height, 5);
+    sf::Image blurred = vectorToImage(imageVector, width, height);
+
+    sf::Texture texture;
+    texture.loadFromImage(blurred);
+    sf::Sprite sprite(texture);
+    sf::RenderWindow window(sf::VideoMode(width, height), "Testing");
+
+
+    while (window.isOpen()) {
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed)
+                window.close();
         }
-        std::cout << std::endl;
+
+        window.clear();
+        window.draw(sprite);
+        window.display();
     }
-
-    float corner = 0.0625, edge = 0.125, mid = 0.25;
-    std::vector<float> exampleKernel = {
-        corner, edge, corner, 
-        edge,   mid,  edge, 
-        corner, edge, corner};
-
-    blur(imageVector, width, height, exampleKernel, 3);
 
     return 0;
 }
