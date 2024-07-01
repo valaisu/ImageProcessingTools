@@ -1,12 +1,11 @@
 #include <SFML/Graphics.hpp>
 #include <iostream>
-#include <numeric>
 #include <vector>
 #include <stdexcept>
-#include <functional>
 #include <map>
 #include <chrono>
 #include <omp.h>
+#include <immintrin.h>
 
 
 uint64_t timeNow() {
@@ -148,9 +147,14 @@ void blur(unsigned char* image, const int widthImage, const int heightImage, con
         return;
     }
 
-    int imageSize = widthImage*heightImage;
-    int pascalRowSum = power(2, kernelSize*2); // 2^(kernelSize*2) 
-    int pascalRowNumber = kernelSize*2; // the first row has number or index "0"
+    const int stepSize = 1;
+    const int imageSize = widthImage*heightImage;
+    const int widthImagePad = (widthImage+stepSize-1)/stepSize*stepSize;
+    const int heightImagePad = (heightImage+stepSize-1)/stepSize*stepSize;
+    const int imageSizePad = heightImagePad * widthImagePad;
+
+    const int pascalRowSum = power(2, kernelSize*2); // 2^(kernelSize*2) 
+    const int pascalRowNumber = kernelSize*2; // the first row has number or index "0"
 
     std::vector<int> pascalRow(pascalRowNumber+1);
     for (int i = 0; i <= pascalRowNumber; i++) {
@@ -161,9 +165,35 @@ void blur(unsigned char* image, const int widthImage, const int heightImage, con
     //printf("%d %d %d \n", int((*image)[0][0]), int((*image)[0][1]), int((*image)[0][2]));
 
     // horizontal blur moves data in here, and vertical blur moves it back out
-    std::vector<int> buffer(widthImage * heightImage); // TODO: try should this also be char?
+    std::vector<unsigned int> buffer(imageSizePad);
 
     for (int color = 0; color < 3; color++) {
+        // clean buffer
+        std::fill(buffer.begin(), buffer.end(), 0);
+
+        // vertical blur
+        #pragma omp parallel for schedule(dynamic)
+        for (size_t y = 0; y < heightImage; y++) {
+            for (size_t x = 0; x < widthImagePad; x+=stepSize) {
+                // TODO: load 16 bytes at time, calc all simultaneously
+                //__m128i dataChars = _mm_loadu_si128(reinterpret_cast<const __m128i*>(&image[color*imageSize + y*widthImage + x]));
+                //__m256i dataShorts = _mm256_cvtepu8_epi16(dataChars);
+                //__m256i dataIntsLow = _mm256_cvtepu16_epi32(_mm256_castsi256_si128(dataShorts));
+                //__m256i dataIntsHigh = _mm256_cvtepu16_epi32(_mm256_extracti128_si256(dataShorts, 1));
+
+                
+                // add all squares
+                int start = std::max(-kernelSize, -int(y));
+                int end = std::min(kernelSize, heightImage-int(y));
+                for (int k = start; k <= end; k++) {
+                    buffer[y*widthImage + x] += image[color*imageSize + (y+k)*widthImage + x] * pascalRow[k+kernelSize];
+                }
+
+                //normalize
+                image[color*imageSize + y*widthImage + x] = buffer[y*widthImage + x] / pascalRowSum;
+            }
+        }
+
         // clean buffer
         std::fill(buffer.begin(), buffer.end(), 0);
 
@@ -185,26 +215,6 @@ void blur(unsigned char* image, const int widthImage, const int heightImage, con
             }
         }
 
-        // clean buffer
-        std::fill(buffer.begin(), buffer.end(), 0);
-
-        // vertical blur
-        #pragma omp parallel for schedule(dynamic)
-        for (size_t y = 0; y < heightImage; y++) {
-            for (size_t x = 0; x < widthImage; x++) {
-
-                // add all squares
-                for (int k = -kernelSize; k <= kernelSize; k++) {
-                    if ((0>y+k)||(y+k>=heightImage)) {
-                        continue;
-                    }
-                    buffer[y*widthImage + x] += image[color*imageSize + y*widthImage + x+k] * pascalRow[k+kernelSize];
-                }
-
-                //normalize
-                image[color*imageSize + y*widthImage + x] = buffer[y*widthImage + x] / pascalRowSum;
-            }
-        }
 
     }
 
